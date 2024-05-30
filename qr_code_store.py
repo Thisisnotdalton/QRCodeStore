@@ -41,7 +41,7 @@ def unchunk_data(chunks: typing.List[bytes], chunk_size: int = storage_limit) ->
     for chunk in chunks:
         assert len(chunk) == chunk_size
         chunk_length = int.from_bytes(chunk[:bytes_for_chunk_length])
-        assert chunk_length < usable_chunk_size
+        assert chunk_length <= usable_chunk_size, f'Chunk has length exceeding usable chunk length: {chunk_length} > {usable_chunk_size}'
         data += chunk[bytes_for_chunk_length:bytes_for_chunk_length + chunk_length]
     return data
 
@@ -51,10 +51,7 @@ FILENAME_SUFFIX = chunk_data(int_to_bytes(2))
 
 
 def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRECT_M, string_prefix: str = ''):
-    data_length = len(data)
     encoded_data = b85encode(data)
-    encoded_data_length = len(encoded_data)
-    print(f'Encoded data: "{encoded_data}"')
     chunks = []
     if len(string_prefix) > 0:
         string_bytes = string_prefix.encode('utf-8')
@@ -62,9 +59,6 @@ def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRE
         chunks.extend(FILENAME_PREFIX)
         chunks.extend(chunk_data(encoded_string_bytes))
         chunks.extend(FILENAME_SUFFIX)
-    # chunks.extend(chunk_data(int_to_bytes(data_length)))
-    # chunks.extend(chunk_data(int_to_bytes(3)))
-    # chunks.extend(chunk_data(int_to_bytes(encoded_data_length)))
     chunks.extend(chunk_data(encoded_data))
     print(
         f'Number of chunks: {len(chunks)}. Approximate size in bytes: {len(chunks) * storage_limit / 1024 / 1024: 0.3f} MB')
@@ -85,18 +79,25 @@ def decode_byte_chunks(chunks: typing.List[bytes]):
     return unchunk_data(chunks), file_name
 
 
-def store_file(file_path: str, qr_version: int = 40, error_correction=qrcode.ERROR_CORRECT_M):
+def store_file(file_path: str, qr_version: int = 40, error_correction=qrcode.ERROR_CORRECT_M,
+               frames_per_second: int = 23):
     with open(file_path, 'rb') as f:
         data = f.read()
     file_name = os.path.split(file_path)[1]
     chunks = store(data, qr_version=qr_version, error_correction=error_correction, string_prefix=file_name)
     b85_encoded_data, decoded_file_name = decode_byte_chunks(chunks)
     decoded_data = b85decode(b85_encoded_data)
-    print(f'File name: "{decoded_file_name}"\tdata: "{decoded_data}"')
     assert file_name == decoded_file_name, f'File name prefix does not match: "{file_name}" != "{decoded_file_name}"'
     assert len(data) == len(
         decoded_data), f'Decoded data length does not match input data: {len(data)} != {len(decoded_data)}'
     assert data == decoded_data, 'Data does not match encoded data'
+    number_qr_codes = math.ceil(len(chunks) / 3)
+    print(f'Estimated number of QR codes: {number_qr_codes}')
+    qr_codes_per_frame = 2
+    frames = math.ceil(number_qr_codes / qr_codes_per_frame)
+    print(f'Estimated number of frames: {frames}')
+    estimated_seconds = math.ceil(frames / frames_per_second)
+    print(f'Estimated seconds of video: {estimated_seconds}. Minutes: {estimated_seconds / 60:0.2f}')
 
 
 if __name__ == '__main__':
