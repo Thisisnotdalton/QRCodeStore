@@ -90,8 +90,13 @@ def store_file(file_path: str, qr_version: int = 40, error_correction=qrcode.ERR
         data = f.read()
     file_name = os.path.split(file_path)[1]
     chunks = store(data, qr_version=qr_version, error_correction=error_correction, string_prefix=file_name)
-    decoded_data, decoded_file_name = decode_byte_chunks(chunks)
+    b85_encoded_data, decoded_file_name = decode_byte_chunks(chunks)
+    decoded_data = b85decode(b85_encoded_data)
     print(f'File name: "{decoded_file_name}"\tdata: "{decoded_data}"')
+    assert file_name == decoded_file_name, f'File name prefix does not match: "{file_name}" != "{decoded_file_name}"'
+    assert len(data) == len(
+        decoded_data), f'Decoded data length does not match input data: {len(data)} != {len(decoded_data)}'
+    assert data == decoded_data, 'Data does not match encoded data'
 
 
 if __name__ == '__main__':
