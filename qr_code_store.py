@@ -56,7 +56,7 @@ def sha256_digest(data: bytes):
 
 
 def create_json_chunk(chunks: dict, **common_meta):
-    json_text = json.dumps(dict(chunks=chunks, **common_meta), separators=(',', ':'))
+    json_text = json.dumps(dict(chunks=chunks, **common_meta), separators=(',', ':'), sort_keys=True)
     chunk = json_text.encode('utf-8')
     return chunk
 
@@ -130,8 +130,9 @@ def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRE
           output_directory: str = 'output', **additional_meta):
     encode = ''
     original_size = len(data)
+    os.makedirs(output_directory, exist_ok=True)
     if gzip_data:
-        data = gzip.compress(data)
+        data = gzip.compress(data, mtime=0)
         size_delta = len(data) - original_size
         print(
             f'Gzipped data size delta: {size_delta / 1024 / 1024:0.2f} MB, {(size_delta + original_size) / original_size * 100: 0.2f}%')
@@ -143,19 +144,26 @@ def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRE
         i: sha256_digest(chunk)
         for i, chunk in enumerate(chunks)
     }
-    common_meta = dict(hash=sha256_digest(encoded_data), encode=encode, chunkCount=len(chunks), **additional_meta)
-    meta_chunks = create_meta_chunks(chunk_hashes, **common_meta)
-    chunk_hashes = {
+    digest_to_chunk = {
         digest: chunks[i]
         for i, digest in chunk_hashes.items()
     }
-    for meta_chunk in meta_chunks:
-        chunk_hashes[sha256_digest(meta_chunk)] = meta_chunk
-    assert len(chunk_hashes) == len(chunks) + len(meta_chunks), f'Hash collision detected!'
-    os.makedirs(output_directory, exist_ok=True)
     chunk_file_paths = {
         os.path.join(output_directory, f'{digest}.png'): chunk
-        for digest, chunk in chunk_hashes.items()
+        for digest, chunk in digest_to_chunk.items()
+    }
+    generate_qr_codes(chunk_file_paths, qr_version, error_correction)
+    common_meta = dict(hash=sha256_digest(encoded_data), encode=encode, chunkCount=len(chunks), **additional_meta)
+    meta_chunks = create_meta_chunks(chunk_hashes, **common_meta)
+    meta_digest_to_chunk = {
+        f'{i}_{sha256_digest(meta_chunk)}': meta_chunk
+        for i, meta_chunk in enumerate(meta_chunks)
+    }
+    digest_to_chunk.update(meta_digest_to_chunk)
+    assert len(digest_to_chunk) == len(chunks) + len(meta_chunks), f'Hash collision detected!'
+    chunk_file_paths = {
+        os.path.join(output_directory, f'meta_{digest}.png'): chunk
+        for digest, chunk in meta_digest_to_chunk.items()
     }
 
     generate_qr_codes(chunk_file_paths, qr_version, error_correction)
@@ -165,6 +173,7 @@ def store_file(file_path: str, qr_version: int = 40, error_correction=qrcode.ERR
                frames_per_second: int = 23, output_directory: str = 'output'):
     with open(file_path, 'rb') as f:
         data = f.read()
+    print(f'File sha256: {sha256_digest(data)}')
     file_name = os.path.split(file_path)[1]
     chunks = store(data, qr_version=qr_version, error_correction=error_correction, file=file_name,
                    output_directory=output_directory)
