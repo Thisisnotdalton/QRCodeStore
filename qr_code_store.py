@@ -101,7 +101,7 @@ def parse_meta_chunk(meta_chunk: bytes) -> dict:
 def save_qr_code_to_file(data: bytes, file: str, qr_version: int = 40, error_correction=qrcode.ERROR_CORRECT_M):
     assert len(data) > 0, f'No data provided for QR code for "{file}"!'
     if not os.path.isfile(file):
-        qr = qrcode.main.QRCode(version=qr_version, error_correction=error_correction)
+        qr = qrcode.main.QRCode(version=qr_version, error_correction=error_correction, box_size=1)
         qr.add_data(data)
         image = qr.make_image(fill_color="black", back_color="white")
         image.save(file)
