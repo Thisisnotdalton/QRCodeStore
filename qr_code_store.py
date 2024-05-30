@@ -1,6 +1,7 @@
 import json
 import math
 import gzip
+from concurrent.futures import ProcessPoolExecutor
 import os.path
 from tqdm import tqdm
 import qrcode
@@ -50,10 +51,6 @@ def unchunk_data(chunks: typing.List[bytes], chunk_size: int = storage_limit, hi
     return data
 
 
-FILENAME_PREFIX = chunk_data(int_to_bytes(1))
-FILENAME_SUFFIX = chunk_data(int_to_bytes(2))
-
-
 def sha256_digest(data: bytes):
     return sha256(data, usedforsecurity=False).hexdigest()
 
@@ -73,23 +70,31 @@ def parse_meta_chunk(meta_chunk: bytes) -> dict:
 
 
 def save_qr_code_to_file(data: bytes, file: str, qr_version: int = 40, error_correction=qrcode.ERROR_CORRECT_M):
-    if os.path.isfile(file):
-        return
     assert len(data) > 0, f'No data provided for QR code for "{file}"!'
-    qr = qrcode.main.QRCode(version=qr_version, error_correction=error_correction)
-    qr.add_data(data)
-    image = qr.make_image(fill_color="black", back_color="white")
-    image.save(file)
+    if not os.path.isfile(file):
+        qr = qrcode.main.QRCode(version=qr_version, error_correction=error_correction)
+        qr.add_data(data)
+        image = qr.make_image(fill_color="black", back_color="white")
+        image.save(file)
+    return file
+
+def _concurrent_save_qr(args):
+    return save_qr_code_to_file(*args)
 
 
 def generate_qr_codes(datas: typing.List[bytes], output_directory: str, qr_version: int = 40,
                       error_correction=qrcode.ERROR_CORRECT_M) -> typing.List[str]:
-    files = []
+    files = [os.path.join(output_directory, f'chunk_{i}.png') for i in range(len(datas))]
     os.makedirs(output_directory, exist_ok=True)
-    for i, data in enumerate(tqdm(datas, desc=f'Generating QR codes in directory "{output_directory}"')):
-        file_name = os.path.join(output_directory, f'chunk_{i}.png')
-        save_qr_code_to_file(data, file_name, qr_version=qr_version, error_correction=error_correction)
-        files.append(file_name)
+    with ProcessPoolExecutor() as executor:
+
+        arguments = [
+            [data, files[i], qr_version, error_correction]
+            for i, data in enumerate(datas)
+        ]
+        futures = executor.map(_concurrent_save_qr, arguments, chunksize=1)
+        for future in tqdm(futures, total=len(arguments), desc=f'Generating QR codes in directory "{output_directory}"'):
+            pass
     return files
 
 
@@ -107,7 +112,7 @@ def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRE
     encoded_data = b85encode(data)
     encode += 'b85'
     chunks = chunk_data(encoded_data, hide_progress=False)
-    generate_qr_codes(chunks, output_directory, qr_version, error_correction)
+    chunk_qr_code_files = generate_qr_codes(chunks, output_directory, qr_version, error_correction)
     common_meta = dict(hash=sha256_digest(encoded_data), encode=encode, chunks=len(chunks), **additional_meta)
     qr_codes_per_frame = images_per_frame * len(color_channels)
     usable_qr_codes = qr_codes_per_frame - 1  # one used for meta
@@ -115,9 +120,10 @@ def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRE
     total_chunk_packages = 0
     for i in range(0, len(chunks), usable_qr_codes):
         batch = chunks[i:i + usable_qr_codes]
+        batch_qr_codes = chunk_qr_code_files[i:i + usable_qr_codes]
         batch_hashes = list(map(sha256_digest, batch))
         meta_chunk = create_meta_chunk(i, **common_meta, batch_hashes=batch_hashes)
-        packaged_chunk = [meta_chunk] + batch
+        packaged_chunk = [meta_chunk] + batch_qr_codes
         total_chunk_packages += len(packaged_chunk)
         meta_packaged_chunks.append(packaged_chunk)
     print(
