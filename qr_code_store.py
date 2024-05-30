@@ -1,6 +1,6 @@
 import math
 import os.path
-
+from tqdm import tqdm
 import qrcode
 from base64 import b85decode, b85encode
 
@@ -21,7 +21,7 @@ def chunk_data(data: bytes, chunk_size: int = storage_limit) -> typing.List[byte
     bytes_for_chunk_length = bytes_to_represent_int(chunk_size)
     usable_chunk_size = chunk_size - bytes_for_chunk_length
     chunks = []
-    for i in range(0, len(data), usable_chunk_size):
+    for i in tqdm(range(0, len(data), usable_chunk_size), desc='Chunking data'):
         chunk_end = min(i + usable_chunk_size, len(data))
         data_chunk = data[i:chunk_end]
         if len(data_chunk) < usable_chunk_size:
@@ -38,7 +38,7 @@ def unchunk_data(chunks: typing.List[bytes], chunk_size: int = storage_limit) ->
     data = bytes()
     bytes_for_chunk_length = bytes_to_represent_int(chunk_size)
     usable_chunk_size = chunk_size - bytes_for_chunk_length
-    for chunk in chunks:
+    for chunk in tqdm(chunks, desc='Combining data chunks'):
         assert len(chunk) == chunk_size
         chunk_length = int.from_bytes(chunk[:bytes_for_chunk_length])
         assert chunk_length <= usable_chunk_size, f'Chunk has length exceeding usable chunk length: {chunk_length} > {usable_chunk_size}'
