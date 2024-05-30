@@ -62,6 +62,9 @@ def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRE
     chunks.extend(chunk_data(encoded_data))
     print(
         f'Number of chunks: {len(chunks)}. Approximate size in bytes: {len(chunks) * storage_limit / 1024 / 1024: 0.3f} MB')
+    original_size = len(encoded_data)
+    size_delta = (len(chunks) * storage_limit) - original_size
+    print(f'Change in size from chunking: {size_delta} bytes, {(size_delta+original_size) / original_size * 100: 0.2f}%')
     return chunks
 
 
