@@ -130,7 +130,6 @@ def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRE
           output_directory: str = 'output', **additional_meta):
     encode = ''
     original_size = len(data)
-    os.makedirs(output_directory, exist_ok=True)
     if gzip_data:
         data = gzip.compress(data, mtime=0)
         size_delta = len(data) - original_size
@@ -148,8 +147,10 @@ def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRE
         digest: chunks[i]
         for i, digest in chunk_hashes.items()
     }
+    chunk_directory = os.path.join(output_directory, 'chunks')
+    os.makedirs(chunk_directory, exist_ok=True)
     chunk_file_paths = {
-        os.path.join(output_directory, f'{digest}.png'): chunk
+        os.path.join(chunk_directory, f'{digest}.png'): chunk
         for digest, chunk in digest_to_chunk.items()
     }
     generate_qr_codes(chunk_file_paths, qr_version, error_correction)
@@ -161,8 +162,10 @@ def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRE
     }
     digest_to_chunk.update(meta_digest_to_chunk)
     assert len(digest_to_chunk) == len(chunks) + len(meta_chunks), f'Hash collision detected!'
+    meta_directory = os.path.join(output_directory, 'meta')
+    os.makedirs(meta_directory, exist_ok=True)
     chunk_file_paths = {
-        os.path.join(output_directory, f'meta_{digest}.png'): chunk
+        os.path.join(meta_directory, f'{digest}.png'): chunk
         for digest, chunk in meta_digest_to_chunk.items()
     }
 
