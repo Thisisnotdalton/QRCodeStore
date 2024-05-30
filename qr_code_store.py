@@ -55,12 +55,41 @@ def sha256_digest(data: bytes):
     return sha256(data, usedforsecurity=False).hexdigest()
 
 
-def create_meta_chunk(chunk_index: int, **kwargs) -> bytes:
-    json_text = json.dumps(dict(i=chunk_index, **kwargs))
-    json_bytes = json_text.encode('utf-8')
-    chunks = chunk_data(json_bytes)
-    assert len(chunks) == 1
-    return chunks[0]
+def create_json_chunk(chunks: dict, **common_meta):
+    json_text = json.dumps(dict(chunks=chunks, **common_meta), separators=(',', ':'))
+    chunk = json_text.encode('utf-8')
+    return chunk
+
+
+def create_meta_chunks(chunkable_meta: typing.Dict[int, str], max_chunk_size: int = 1024, min_chunk_size: int = 1,
+                       **common_meta) -> \
+        typing.List[bytes]:
+    chunks = []
+    max_key_length = max(list(map(len, map(str, chunkable_meta.keys()))))
+    max_value_length = max(list(map(len, chunkable_meta.values())))
+    max_example_item = ['K' * max_key_length, 'V' * max_value_length]
+    while max_chunk_size > min_chunk_size:
+        chunk_size = int((min_chunk_size + max_chunk_size) / 2)
+        if chunk_size == min_chunk_size:
+            chunk_size += 1
+        example_chunks = [max_example_item for i in range(chunk_size)]
+        chunk = create_json_chunk(example_chunks, **common_meta)
+        if len(chunk) > storage_limit:
+            max_chunk_size = chunk_size - 1
+        else:
+            min_chunk_size = chunk_size
+    print(f'Max chunk size: {min_chunk_size}')
+    queue = list(sorted(chunkable_meta.keys()))
+    while len(queue) > 0:
+        batch = queue[:min_chunk_size]
+        queue = queue[min_chunk_size:]
+        batch_chunk = {
+            str(k): chunkable_meta[k] for k in batch
+        }
+        meta_chunk = create_json_chunk(batch_chunk, **common_meta)
+        assert len(meta_chunk) <= storage_limit
+        chunks.append(meta_chunk)
+    return chunks
 
 
 def parse_meta_chunk(meta_chunk: bytes) -> dict:
@@ -78,24 +107,22 @@ def save_qr_code_to_file(data: bytes, file: str, qr_version: int = 40, error_cor
         image.save(file)
     return file
 
+
 def _concurrent_save_qr(args):
     return save_qr_code_to_file(*args)
 
 
-def generate_qr_codes(datas: typing.List[bytes], output_directory: str, qr_version: int = 40,
-                      error_correction=qrcode.ERROR_CORRECT_M) -> typing.List[str]:
-    files = [os.path.join(output_directory, f'chunk_{i}.png') for i in range(len(datas))]
-    os.makedirs(output_directory, exist_ok=True)
+def generate_qr_codes(datas: typing.Dict[str, bytes], qr_version: int = 40,
+                      error_correction=qrcode.ERROR_CORRECT_M):
     with ProcessPoolExecutor() as executor:
-
         arguments = [
-            [data, files[i], qr_version, error_correction]
-            for i, data in enumerate(datas)
+            [data, file, qr_version, error_correction]
+            for file, data in datas.items()
         ]
         futures = executor.map(_concurrent_save_qr, arguments, chunksize=1)
-        for future in tqdm(futures, total=len(arguments), desc=f'Generating QR codes in directory "{output_directory}"'):
+        for future in tqdm(futures, total=len(arguments),
+                           desc=f'Generating QR codes'):
             pass
-    return files
 
 
 def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRECT_M, images_per_frame=2,
@@ -112,26 +139,26 @@ def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRE
     encoded_data = b85encode(data)
     encode += 'b85'
     chunks = chunk_data(encoded_data, hide_progress=False)
-    chunk_qr_code_files = generate_qr_codes(chunks, output_directory, qr_version, error_correction)
-    common_meta = dict(hash=sha256_digest(encoded_data), encode=encode, chunks=len(chunks), **additional_meta)
-    qr_codes_per_frame = images_per_frame * len(color_channels)
-    usable_qr_codes = qr_codes_per_frame - 1  # one used for meta
-    meta_packaged_chunks = []
-    total_chunk_packages = 0
-    for i in range(0, len(chunks), usable_qr_codes):
-        batch = chunks[i:i + usable_qr_codes]
-        batch_qr_codes = chunk_qr_code_files[i:i + usable_qr_codes]
-        batch_hashes = list(map(sha256_digest, batch))
-        meta_chunk = create_meta_chunk(i, **common_meta, batch_hashes=batch_hashes)
-        packaged_chunk = [meta_chunk] + batch_qr_codes
-        total_chunk_packages += len(packaged_chunk)
-        meta_packaged_chunks.append(packaged_chunk)
-    print(
-        f'Number of frames: {len(meta_packaged_chunks)}. Approximate size in bytes: {total_chunk_packages * storage_limit / 1024 / 1024: 0.3f} MB')
-    size_delta = (total_chunk_packages * storage_limit) - original_size
-    print(
-        f'Change in size from packaged chunking: {size_delta / 1024 / 1024: 0.2f} MB, {(size_delta + original_size) / original_size * 100: 0.2f}%')
-    return meta_packaged_chunks
+    chunk_hashes = {
+        i: sha256_digest(chunk)
+        for i, chunk in enumerate(chunks)
+    }
+    common_meta = dict(hash=sha256_digest(encoded_data), encode=encode, chunkCount=len(chunks), **additional_meta)
+    meta_chunks = create_meta_chunks(chunk_hashes, **common_meta)
+    chunk_hashes = {
+        digest: chunks[i]
+        for i, digest in chunk_hashes.items()
+    }
+    for meta_chunk in meta_chunks:
+        chunk_hashes[sha256_digest(meta_chunk)] = meta_chunk
+    assert len(chunk_hashes) == len(chunks) + len(meta_chunks), f'Hash collision detected!'
+    os.makedirs(output_directory, exist_ok=True)
+    chunk_file_paths = {
+        os.path.join(output_directory, f'{digest}.png'): chunk
+        for digest, chunk in chunk_hashes.items()
+    }
+
+    generate_qr_codes(chunk_file_paths, qr_version, error_correction)
 
 
 def store_file(file_path: str, qr_version: int = 40, error_correction=qrcode.ERROR_CORRECT_M,
