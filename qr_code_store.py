@@ -4,11 +4,13 @@ import gzip
 from concurrent.futures import ProcessPoolExecutor
 import os.path
 from tqdm import tqdm
-import qrcode
 from base64 import b85decode, b85encode
 from hashlib import sha256
-
 import typing
+
+import qrcode
+import numpy as np
+from PIL import Image
 
 storage_limit = 1852
 
@@ -125,8 +127,46 @@ def generate_qr_codes(datas: typing.Dict[str, bytes], qr_version: int = 40,
             pass
 
 
-def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRECT_M, images_per_frame=2,
-          color_channels: str = 'RGB', gzip_data: bool = True,
+def combine_qr_code(out_file: str, *channels):
+    if os.path.isfile(out_file):
+        return
+    output_array = None
+    for i, channel_file in enumerate(channels):
+        with Image.open(channel_file) as channel_image:
+            if i == 0:
+                output_array = np.zeros((*channel_image.size, 3), dtype=np.uint8)
+            else:
+                channel_image = channel_image.rotate(90*i, expand=False)
+            output_array[:, :, i] = np.asarray(channel_image) * 255
+    output_image = Image.fromarray(output_array)
+    output_image.save(out_file)
+
+
+def _concurrent_combine_qr_codes(args):
+    combine_qr_code(*args)
+
+
+def combine_qr_code_files(qr_code_files: typing.List[str], output_directory: str) -> typing.List[str]:
+    queue = list(qr_code_files)
+    files = []
+    jobs = []
+    digits_for_enumeration = len(str(math.ceil(len(qr_code_files)/3)))
+    os.makedirs(output_directory, exist_ok=True)
+    while len(queue) > 0:
+        batch = queue[:3]
+        queue = queue[3:]
+        batch_hash = sha256_digest(str(batch).encode('utf-8'))
+        file_name = os.path.join(output_directory, f'{len(files):0{digits_for_enumeration}}_{batch_hash}.png')
+        files.append(file_name)
+        jobs.append([file_name, *batch])
+    with ProcessPoolExecutor() as executor:
+        futures = executor.map(_concurrent_combine_qr_codes, jobs, chunksize=1)
+        for future in tqdm(futures, total=len(jobs), desc=f'Combining QR codes'):
+            pass
+    return files
+
+
+def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRECT_M, gzip_data: bool = True,
           output_directory: str = 'output', **additional_meta):
     encode = ''
     original_size = len(data)
@@ -156,24 +196,27 @@ def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRE
     generate_qr_codes(chunk_file_paths, qr_version, error_correction)
     common_meta = dict(hash=sha256_digest(encoded_data), encode=encode, chunkCount=len(chunks), **additional_meta)
     meta_chunks = create_meta_chunks(chunk_hashes, **common_meta)
+    digits_for_enumeration = len(str(len(meta_chunks)))
     meta_digest_to_chunk = {
-        f'{i}_{sha256_digest(meta_chunk)}': meta_chunk
+        f'{i:0{digits_for_enumeration}}_{sha256_digest(meta_chunk)}': meta_chunk
         for i, meta_chunk in enumerate(meta_chunks)
     }
     digest_to_chunk.update(meta_digest_to_chunk)
     assert len(digest_to_chunk) == len(chunks) + len(meta_chunks), f'Hash collision detected!'
     meta_directory = os.path.join(output_directory, 'meta')
     os.makedirs(meta_directory, exist_ok=True)
-    chunk_file_paths = {
+    meta_chunk_file_paths = {
         os.path.join(meta_directory, f'{digest}.png'): chunk
         for digest, chunk in meta_digest_to_chunk.items()
     }
 
-    generate_qr_codes(chunk_file_paths, qr_version, error_correction)
+    generate_qr_codes(meta_chunk_file_paths, qr_version, error_correction)
+    all_qr_code_files = sorted(meta_chunk_file_paths.keys()) + sorted(chunk_file_paths.keys())
+    combine_qr_code_files(all_qr_code_files, os.path.join(output_directory, 'combined'))
 
 
 def store_file(file_path: str, qr_version: int = 40, error_correction=qrcode.ERROR_CORRECT_M,
-               frames_per_second: int = 23, output_directory: str = 'output'):
+               output_directory: str = 'output'):
     with open(file_path, 'rb') as f:
         data = f.read()
     print(f'File sha256: {sha256_digest(data)}')
