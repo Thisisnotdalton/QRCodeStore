@@ -217,11 +217,21 @@ def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRE
     colored_image_files = combine_qr_code_files(all_qr_code_files, os.path.join(output_directory, 'combined'))
     import random
     random.seed(encoded_data)
-    colored_images = list(map(lambda _i: Image.open(colored_image_files[_i]).rotate((random.randint(0,4) * 90) % 360, expand=False, resample=Resampling.NEAREST),
-                              range(len(colored_image_files))))
+    colored_images = list(
+        map(lambda _i: Image.open(colored_image_files[_i]).rotate((random.randint(0, 4) * 90) % 360, expand=False,
+                                                                  resample=Resampling.NEAREST),
+            range(len(colored_image_files))))
     sequence_image = colored_images.pop(0)
-    sequence_image.save(os.path.join(output_directory, 'sequence.gif'), save_all=True, disposal=2,
-                        append_images=colored_images, loop=0, duration=1000/target_framerate)
+    common_sequence_config = dict(
+        append_images=colored_images,
+        loop=0,
+        save_all=True,
+        duration=1000 / target_framerate
+    )
+    sequence_image.save(os.path.join(output_directory, 'sequence.gif'),
+                        disposal=2, **common_sequence_config)
+    sequence_image.save(os.path.join(output_directory, 'sequence.webp'),
+                        lossless=True, method=6, **common_sequence_config)
 
 
 def store_file(file_path: str, qr_version: int = 40, error_correction=qrcode.ERROR_CORRECT_M,
