@@ -3,6 +3,8 @@ import math
 import gzip
 from concurrent.futures import ProcessPoolExecutor
 import os.path
+
+from PIL.Image import Resampling
 from tqdm import tqdm
 from base64 import b85decode, b85encode
 from hashlib import sha256
@@ -136,7 +138,7 @@ def combine_qr_code(out_file: str, *channels):
             if i == 0:
                 output_array = np.zeros((*channel_image.size, 3), dtype=np.uint8)
             else:
-                channel_image = channel_image.rotate(90 * i, expand=False)
+                channel_image = channel_image.rotate(90 * i, expand=False, resample=Resampling.NEAREST)
             output_array[:, :, i] = np.asarray(channel_image) * 255
     output_image = Image.fromarray(output_array)
     output_image.save(out_file)
@@ -213,7 +215,7 @@ def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRE
     generate_qr_codes(meta_chunk_file_paths, qr_version, error_correction)
     all_qr_code_files = sorted(meta_chunk_file_paths.keys()) + sorted(chunk_file_paths.keys())
     colored_image_files = combine_qr_code_files(all_qr_code_files, os.path.join(output_directory, 'combined'))
-    colored_images = list(map(lambda _i: Image.open(colored_image_files[_i]).rotate((_i * 90) % 360, expand=False),
+    colored_images = list(map(lambda _i: Image.open(colored_image_files[_i]).rotate((_i * 90) % 360, expand=False, resample=Resampling.NEAREST),
                               range(len(colored_image_files))))
     sequence_image = colored_images.pop(0)
     sequence_image.save(os.path.join(output_directory, 'sequence.gif'), save_all=True, disposal=2,
