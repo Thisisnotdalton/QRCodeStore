@@ -215,7 +215,9 @@ def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRE
     generate_qr_codes(meta_chunk_file_paths, qr_version, error_correction)
     all_qr_code_files = sorted(meta_chunk_file_paths.keys()) + sorted(chunk_file_paths.keys())
     colored_image_files = combine_qr_code_files(all_qr_code_files, os.path.join(output_directory, 'combined'))
-    colored_images = list(map(lambda _i: Image.open(colored_image_files[_i]).rotate((_i * 90) % 360, expand=False, resample=Resampling.NEAREST),
+    import random
+    random.seed(encoded_data)
+    colored_images = list(map(lambda _i: Image.open(colored_image_files[_i]).rotate((random.randint(0,4) * 90) % 360, expand=False, resample=Resampling.NEAREST),
                               range(len(colored_image_files))))
     sequence_image = colored_images.pop(0)
     sequence_image.save(os.path.join(output_directory, 'sequence.gif'), save_all=True, disposal=2,
