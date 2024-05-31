@@ -136,7 +136,7 @@ def combine_qr_code(out_file: str, *channels):
             if i == 0:
                 output_array = np.zeros((*channel_image.size, 3), dtype=np.uint8)
             else:
-                channel_image = channel_image.rotate(90*i, expand=False)
+                channel_image = channel_image.rotate(90 * i, expand=False)
             output_array[:, :, i] = np.asarray(channel_image) * 255
     output_image = Image.fromarray(output_array)
     output_image.save(out_file)
@@ -150,7 +150,7 @@ def combine_qr_code_files(qr_code_files: typing.List[str], output_directory: str
     queue = list(qr_code_files)
     files = []
     jobs = []
-    digits_for_enumeration = len(str(math.ceil(len(qr_code_files)/3)))
+    digits_for_enumeration = len(str(math.ceil(len(qr_code_files) / 3)))
     os.makedirs(output_directory, exist_ok=True)
     while len(queue) > 0:
         batch = queue[:3]
@@ -167,7 +167,7 @@ def combine_qr_code_files(qr_code_files: typing.List[str], output_directory: str
 
 
 def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRECT_M, gzip_data: bool = True,
-          output_directory: str = 'output', **additional_meta):
+          output_directory: str = 'output', target_framerate: int = 24, **additional_meta):
     encode = ''
     original_size = len(data)
     if gzip_data:
@@ -212,7 +212,12 @@ def store(data: bytes, qr_version: int = 40, error_correction=qrcode.ERROR_CORRE
 
     generate_qr_codes(meta_chunk_file_paths, qr_version, error_correction)
     all_qr_code_files = sorted(meta_chunk_file_paths.keys()) + sorted(chunk_file_paths.keys())
-    combine_qr_code_files(all_qr_code_files, os.path.join(output_directory, 'combined'))
+    colored_image_files = combine_qr_code_files(all_qr_code_files, os.path.join(output_directory, 'combined'))
+    colored_images = list(map(lambda _i: Image.open(colored_image_files[_i]).rotate((_i * 90) % 360, expand=False),
+                              range(len(colored_image_files))))
+    sequence_image = colored_images.pop(0)
+    sequence_image.save(os.path.join(output_directory, 'sequence.gif'), save_all=True, disposal=2,
+                        append_images=colored_images, loop=0, duration=1000/target_framerate)
 
 
 def store_file(file_path: str, qr_version: int = 40, error_correction=qrcode.ERROR_CORRECT_M,
@@ -223,18 +228,6 @@ def store_file(file_path: str, qr_version: int = 40, error_correction=qrcode.ERR
     file_name = os.path.split(file_path)[1]
     chunks = store(data, qr_version=qr_version, error_correction=error_correction, file=file_name,
                    output_directory=output_directory)
-    # b85_encoded_data, decoded_file_name = decode_byte_chunks(chunks)
-    # decoded_data = b85decode(b85_encoded_data)
-    # assert file_name == decoded_file_name, f'File name prefix does not match: "{file_name}" != "{decoded_file_name}"'
-    # assert len(data) == len(
-    #     decoded_data), f'Decoded data length does not match input data: {len(data)} != {len(decoded_data)}'
-    # assert data == decoded_data, 'Data does not match encoded data'
-    # number_qr_codes = math.ceil(len(chunks) / 3)
-    # print(f'Estimated number of QR codes: {number_qr_codes}')
-    # frames = math.ceil(number_qr_codes / qr_codes_per_frame)
-    # print(f'Estimated number of frames: {frames}')
-    # estimated_seconds = math.ceil(frames / frames_per_second)
-    # print(f'Estimated seconds of video: {estimated_seconds}. Minutes: {estimated_seconds / 60:0.2f}')
 
 
 if __name__ == '__main__':
